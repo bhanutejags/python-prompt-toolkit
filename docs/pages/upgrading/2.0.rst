@@ -45,7 +45,7 @@ instance:
   key in prompts.
 
 Given that we were going to break compatibility anyway, we changed a couple of
-other important things that both effect both simple prompt applications and
+other important things that effect both simple prompt applications and
 full screen applications. These are the most important:
 
 - We no longer depend on Pygments for styling. While we like Pygments, it was
@@ -172,6 +172,15 @@ adaptor to make it compatible with the native prompt_toolkit objects.
 
   Multiple styles can be merged together using
   :func:`~prompt_toolkit.styles.merge_styles`.
+
+
+Wordcompleter
+^^^^^^^^^^^^^
+
+`WordCompleter` was moved from
+:class:`prompt_toolkit.contrib.completers.base.WordCompleter` to
+:class:`prompt_toolkit.completion.word_completer.WordCompleter`.
+
 
 Asynchronous autocompletion
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

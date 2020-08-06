@@ -31,13 +31,14 @@ def load_auto_suggest_bindings() -> KeyBindings:
         app = get_app()
         return (
             app.current_buffer.suggestion is not None
+            and len(app.current_buffer.suggestion.text) > 0
             and app.current_buffer.document.is_cursor_at_the_end
         )
 
     @handle("c-f", filter=suggestion_available)
     @handle("c-e", filter=suggestion_available)
     @handle("right", filter=suggestion_available)
-    def _(event: E) -> None:
+    def _accept(event: E) -> None:
         """
         Accept suggestion.
         """
@@ -48,7 +49,7 @@ def load_auto_suggest_bindings() -> KeyBindings:
             b.insert_text(suggestion.text)
 
     @handle("escape", "f", filter=suggestion_available & emacs_mode)
-    def _(event: E) -> None:
+    def _fill(event: E) -> None:
         """
         Fill partial suggestion.
         """

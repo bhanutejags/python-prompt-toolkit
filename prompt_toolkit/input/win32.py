@@ -9,7 +9,7 @@ from ctypes.wintypes import DWORD, HANDLE
 from typing import Callable, ContextManager, Dict, Iterable, Optional, TextIO
 
 from prompt_toolkit.eventloop import run_in_executor_with_context
-from prompt_toolkit.eventloop.win32 import wait_for_handles
+from prompt_toolkit.eventloop.win32 import create_win32_event, wait_for_handles
 from prompt_toolkit.key_binding.key_processor import KeyPress
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.mouse_events import MouseEventType
@@ -356,70 +356,50 @@ class ConsoleInputReader:
             and ev.ControlKeyState & self.SHIFT_PRESSED
             and result
         ):
-            if result.key == Keys.Left:
-                result.key = Keys.ShiftControlLeft
-
-            if result.key == Keys.Right:
-                result.key = Keys.ShiftControlRight
-
-            if result.key == Keys.Home:
-                result.key = Keys.ShiftControlHome
-
-            if result.key == Keys.End:
-                result.key = Keys.ShiftControlEnd
+            result.key = {
+                Keys.Left: Keys.ControlShiftLeft,
+                Keys.Right: Keys.ControlShiftRight,
+                Keys.Up: Keys.ControlShiftUp,
+                Keys.Down: Keys.ControlShiftDown,
+                Keys.Home: Keys.ControlShiftHome,
+                Keys.End: Keys.ControlShiftEnd,
+                Keys.Insert: Keys.ControlShiftInsert,
+                Keys.PageUp: Keys.ControlShiftPageUp,
+                Keys.PageDown: Keys.ControlShiftPageDown,
+            }.get(result.key, result.key)
 
         # Correctly handle Control-Arrow/Home/End and Control-Insert keys.
         if (
             ev.ControlKeyState & self.LEFT_CTRL_PRESSED
             or ev.ControlKeyState & self.RIGHT_CTRL_PRESSED
         ) and result:
-            if result.key == Keys.Left:
-                result.key = Keys.ControlLeft
-
-            if result.key == Keys.Right:
-                result.key = Keys.ControlRight
-
-            if result.key == Keys.Up:
-                result.key = Keys.ControlUp
-
-            if result.key == Keys.Down:
-                result.key = Keys.ControlDown
-
-            if result.key == Keys.Home:
-                result.key = Keys.ControlHome
-
-            if result.key == Keys.End:
-                result.key = Keys.ControlEnd
-
-            if result.key == Keys.Insert:
-                result.key = Keys.ControlInsert
+            result.key = {
+                Keys.Left: Keys.ControlLeft,
+                Keys.Right: Keys.ControlRight,
+                Keys.Up: Keys.ControlUp,
+                Keys.Down: Keys.ControlDown,
+                Keys.Home: Keys.ControlHome,
+                Keys.End: Keys.ControlEnd,
+                Keys.Insert: Keys.ControlInsert,
+                Keys.PageUp: Keys.ControlPageUp,
+                Keys.PageDown: Keys.ControlPageDown,
+            }.get(result.key, result.key)
 
         # Turn 'Tab' into 'BackTab' when shift was pressed.
         # Also handle other shift-key combination
         if ev.ControlKeyState & self.SHIFT_PRESSED and result:
-            if result.key == Keys.Tab:
-                result.key = Keys.BackTab
-
-            if result.key == Keys.Left:
-                result.key = Keys.ShiftLeft
-
-            if result.key == Keys.Right:
-                result.key = Keys.ShiftRight
-
-            if result.key == Keys.Up:
-                result.key = Keys.ShiftUp
-
-            if result.key == Keys.Down:
-                result.key = Keys.ShiftDown
-
-            if result.key == Keys.Home:
-                result.key = Keys.ShiftHome
-
-            if result.key == Keys.End:
-                result.key = Keys.ShiftEnd
-
-            if result.key == Keys.Insert:
-                result.key = Keys.ShiftInsert
+            result.key = {
+                Keys.Tab: Keys.BackTab,
+                Keys.Left: Keys.ShiftLeft,
+                Keys.Right: Keys.ShiftRight,
+                Keys.Up: Keys.ShiftUp,
+                Keys.Down: Keys.ShiftDown,
+                Keys.Home: Keys.ShiftHome,
+                Keys.End: Keys.ShiftEnd,
+                Keys.Insert: Keys.ShiftInsert,
+                Keys.PageUp: Keys.ShiftPageUp,
+                Keys.PageDown: Keys.ShiftPageDown,
+            }.get(result.key, result.key)
 
         # Turn 'Space' into 'ControlSpace' when control was pressed.
         if (
@@ -476,7 +456,7 @@ class ConsoleInputReader:
             # On a key press, generate both the mouse down and up event.
             for event_type in [MouseEventType.MOUSE_DOWN, MouseEventType.MOUSE_UP]:
                 data = ";".join(
-                    [str(event_type), str(ev.MousePosition.X), str(ev.MousePosition.Y)]
+                    [event_type.value, str(ev.MousePosition.X), str(ev.MousePosition.Y)]
                 )
                 result.append(KeyPress(Keys.WindowsMouseEvent, data))
 
@@ -486,21 +466,44 @@ class ConsoleInputReader:
 class _Win32Handles:
     """
     Utility to keep track of which handles are connectod to which callbacks.
+
+    `add_win32_handle` starts a tiny event loop in another thread which waits
+    for the Win32 handle to become ready. When this happens, the callback will
+    be called in the current asyncio event loop using `call_soon_threadsafe`.
+
+    `remove_win32_handle` will stop this tiny event loop.
+
+    NOTE: We use this technique, so that we don't have to use the
+          `ProactorEventLoop` on Windows and we can wait for things like stdin
+          in a `SelectorEventLoop`. This is important, because our inputhook
+          mechanism (used by IPython), only works with the `SelectorEventLoop`.
     """
 
     def __init__(self) -> None:
         self._handle_callbacks: Dict[int, Callable[[], None]] = {}
 
+        # Windows Events that are triggered when we have to stop watching this
+        # handle.
+        self._remove_events: Dict[int, HANDLE] = {}
+
     def add_win32_handle(self, handle: HANDLE, callback: Callable[[], None]) -> None:
         """
         Add a Win32 handle to the event loop.
         """
-        if handle.value is None:
-            raise ValueError("Invalid handle.")
         handle_value = handle.value
+
+        if handle_value is None:
+            raise ValueError("Invalid handle.")
+
+        # Make sure to remove a previous registered handler first.
+        self.remove_win32_handle(handle)
 
         loop = get_event_loop()
         self._handle_callbacks[handle_value] = callback
+
+        # Create remove event.
+        remove_event = create_win32_event()
+        self._remove_events[handle_value] = remove_event
 
         # Add reader.
         def ready() -> None:
@@ -514,20 +517,38 @@ class _Win32Handles:
         # (Use an executor for this, the Windows asyncio event loop doesn't
         # allow us to wait for handles like stdin.)
         def wait() -> None:
-            if self._handle_callbacks.get(handle_value) != callback:
-                return
+            # Wait until either the handle becomes ready, or the remove event
+            # has been set.
+            result = wait_for_handles([remove_event, handle])
 
-            wait_for_handles([handle])
-            loop.call_soon_threadsafe(ready)
+            if result is remove_event:
+                windll.kernel32.CloseHandle(remove_event)
+                return
+            else:
+                loop.call_soon_threadsafe(ready)
 
         run_in_executor_with_context(wait, loop=loop)
 
-    def remove_win32_handle(self, handle: HANDLE) -> None:
+    def remove_win32_handle(self, handle: HANDLE) -> Optional[Callable[[], None]]:
         """
         Remove a Win32 handle from the event loop.
+        Return either the registered handler or `None`.
         """
-        if handle.value in self._handle_callbacks:
-            del self._handle_callbacks[handle.value]
+        if handle.value is None:
+            return None  # Ignore.
+
+        # Trigger remove events, so that the reader knows to stop.
+        try:
+            event = self._remove_events.pop(handle.value)
+        except KeyError:
+            pass
+        else:
+            windll.kernel32.SetEvent(event)
+
+        try:
+            return self._handle_callbacks.pop(handle.value)
+        except KeyError:
+            return None
 
 
 @contextmanager
@@ -545,7 +566,7 @@ def attach_win32_input(input: _Win32InputBase, callback: Callable[[], None]):
         raise ValueError("Invalid handle.")
 
     # Add reader.
-    previous_callback = win32_handles._handle_callbacks.get(handle.value)
+    previous_callback = win32_handles.remove_win32_handle(handle)
     win32_handles.add_win32_handle(handle, callback)
 
     try:
@@ -565,15 +586,13 @@ def detach_win32_input(input: _Win32InputBase):
     if handle.value is None:
         raise ValueError("Invalid handle.")
 
-    previous = win32_handles._handle_callbacks.get(handle.value)
-    if previous:
-        win32_handles.remove_win32_handle(handle)
+    previous_callback = win32_handles.remove_win32_handle(handle)
 
     try:
         yield
     finally:
-        if previous:
-            win32_handles.add_win32_handle(handle, previous)
+        if previous_callback:
+            win32_handles.add_win32_handle(handle, previous_callback)
 
 
 class raw_mode:

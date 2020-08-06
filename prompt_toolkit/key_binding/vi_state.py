@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Callable, Dict, Optional
 from prompt_toolkit.clipboard import ClipboardData
 
 if TYPE_CHECKING:
-    from .key_processor import KeyPressEvent
     from .key_bindings.vi import TextObject
+    from .key_processor import KeyPressEvent
 
 __all__ = [
     "InputMode",
@@ -21,6 +21,7 @@ class InputMode(str, Enum):
     INSERT_MULTIPLE = "vi-insert-multiple"
     NAVIGATION = "vi-navigation"  # Normal mode.
     REPLACE = "vi-replace"
+    REPLACE_SINGLE = "vi-replace-single"
 
 
 class CharacterFind:
@@ -37,7 +38,7 @@ class ViState:
     def __init__(self) -> None:
         #: None or CharacterFind instance. (This is used to repeat the last
         #: search in Vi mode, by pressing the 'n' or 'N' in navigation mode.)
-        self.last_character_find = None
+        self.last_character_find: Optional[CharacterFind] = None
 
         # When an operator is given and we are waiting for text object,
         # -- e.g. in the case of 'dw', after the 'd' --, an operator callback
@@ -67,7 +68,7 @@ class ViState:
         # recording is stopped. So we record in a separate `current_recording`
         # variable.
         self.recording_register: Optional[str] = None
-        self.current_recording = ""
+        self.current_recording: str = ""
 
         # Temporary navigation (normal) mode.
         # This happens when control-o has been pressed in insert or replace

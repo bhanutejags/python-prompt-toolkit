@@ -1,7 +1,6 @@
 import os
 from enum import Enum
-
-from prompt_toolkit.utils import is_windows
+from typing import Optional
 
 __all__ = [
     "ColorDepth",
@@ -34,24 +33,26 @@ class ColorDepth(str, Enum):
     TRUE_COLOR = DEPTH_24_BIT
 
     @classmethod
-    def default(cls, term: str = "") -> "ColorDepth":
+    def from_env(cls) -> Optional["ColorDepth"]:
         """
-        If the user doesn't specify a color depth, use this as a default.
+        Return the color depth if the $PROMPT_TOOLKIT_COLOR_DEPTH environment
+        variable has been set.
+
+        This is a way to enforce a certain color depth in all prompt_toolkit
+        applications.
         """
-        if term in ("linux", "eterm-color"):
-            return cls.DEPTH_4_BIT
-
-        # For now, always use 4 bit color on Windows 10 by default, even when
-        # vt100 escape sequences with ENABLE_VIRTUAL_TERMINAL_PROCESSING are
-        # supported. We don't have a reliable way yet to know whether our
-        # console supports true color or only 4-bit.
-        if is_windows() and "PROMPT_TOOLKIT_COLOR_DEPTH" not in os.environ:
-            return cls.DEPTH_4_BIT
-
         # Check the `PROMPT_TOOLKIT_COLOR_DEPTH` environment variable.
         all_values = [i.value for i in ColorDepth]
-
         if os.environ.get("PROMPT_TOOLKIT_COLOR_DEPTH") in all_values:
             return cls(os.environ["PROMPT_TOOLKIT_COLOR_DEPTH"])
 
-        return cls.DEPTH_8_BIT
+        return None
+
+    @classmethod
+    def default(cls) -> "ColorDepth":
+        """
+        Return the default color depth for the default output.
+        """
+        from .defaults import create_output
+
+        return create_output().get_default_color_depth()

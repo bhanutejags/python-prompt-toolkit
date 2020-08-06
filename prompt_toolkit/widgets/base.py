@@ -59,7 +59,11 @@ from prompt_toolkit.layout.controls import (
 from prompt_toolkit.layout.dimension import AnyDimension
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.dimension import to_dimension
-from prompt_toolkit.layout.margins import NumberedMargin, ScrollbarMargin
+from prompt_toolkit.layout.margins import (
+    ConditionalMargin,
+    NumberedMargin,
+    ScrollbarMargin,
+)
 from prompt_toolkit.layout.processors import (
     AppendAutoSuggestion,
     BeforeInput,
@@ -275,7 +279,7 @@ class TextArea:
 
     @text.setter
     def text(self, value: str) -> None:
-        self.buffer.set_document(Document(value, 0), bypass_readonly=True)
+        self.document = Document(value, 0)
 
     @property
     def document(self) -> Document:
@@ -286,7 +290,7 @@ class TextArea:
 
     @document.setter
     def document(self, value: Document) -> None:
-        self.buffer.document = value
+        self.buffer.set_document(value, bypass_readonly=True)
 
     @property
     def accept_handler(self) -> Optional[BufferAcceptHandler]:
@@ -628,6 +632,10 @@ _T = TypeVar("_T")
 
 
 class _DialogList(Generic[_T]):
+    """
+    Common code for `RadioList` and `CheckboxList`.
+    """
+
     open_character: str = ""
     close_character: str = ""
     container_style: str = ""
@@ -635,6 +643,7 @@ class _DialogList(Generic[_T]):
     selected_style: str = ""
     checked_style: str = ""
     multiple_selection: bool = False
+    show_scrollbar: bool = True
 
     def __init__(self, values: Sequence[Tuple[_T, AnyFormattedText]]) -> None:
         assert len(values) > 0
@@ -650,38 +659,43 @@ class _DialogList(Generic[_T]):
         kb = KeyBindings()
 
         @kb.add("up")
-        def _(event: E) -> None:
+        def _up(event: E) -> None:
             self._selected_index = max(0, self._selected_index - 1)
 
         @kb.add("down")
-        def _(event: E) -> None:
+        def _down(event: E) -> None:
             self._selected_index = min(len(self.values) - 1, self._selected_index + 1)
 
         @kb.add("pageup")
-        def _(event: E) -> None:
+        def _pageup(event: E) -> None:
             w = event.app.layout.current_window
-            self._selected_index = max(
-                0, self._selected_index - len(w.render_info.displayed_lines)
-            )
+            if w.render_info:
+                self._selected_index = max(
+                    0, self._selected_index - len(w.render_info.displayed_lines)
+                )
 
         @kb.add("pagedown")
-        def _(event: E) -> None:
+        def _pagedown(event: E) -> None:
             w = event.app.layout.current_window
-            self._selected_index = min(
-                len(self.values) - 1,
-                self._selected_index + len(w.render_info.displayed_lines),
-            )
+            if w.render_info:
+                self._selected_index = min(
+                    len(self.values) - 1,
+                    self._selected_index + len(w.render_info.displayed_lines),
+                )
 
         @kb.add("enter")
         @kb.add(" ")
-        def _(event: E) -> None:
+        def _click(event: E) -> None:
             self._handle_enter()
 
         @kb.add(Keys.Any)
-        def _(event: E) -> None:
+        def _find(event: E) -> None:
             # We first check values after the selected value, then all values.
-            for value in self.values[self._selected_index + 1 :] + self.values:
-                if value[1].startswith(event.data):
+            values = list(self.values)
+            for value in values[self._selected_index + 1 :] + values:
+                text = fragment_list_to_text(to_formatted_text(value[1])).lower()
+
+                if text.startswith(event.data.lower()):
                     self._selected_index = self.values.index(value)
                     return
 
@@ -693,7 +707,12 @@ class _DialogList(Generic[_T]):
         self.window = Window(
             content=self.control,
             style=self.container_style,
-            right_margins=[ScrollbarMargin(display_arrows=True),],
+            right_margins=[
+                ConditionalMargin(
+                    margin=ScrollbarMargin(display_arrows=True),
+                    filter=Condition(lambda: self.show_scrollbar),
+                ),
+            ],
             dont_extend_height=True,
         )
 
@@ -795,13 +814,23 @@ class Checkbox(CheckboxList[str]):
     :param text: the text
     """
 
-    def __init__(self, text: AnyFormattedText = "") -> None:
+    show_scrollbar = False
+
+    def __init__(self, text: AnyFormattedText = "", checked: bool = False) -> None:
         values = [("value", text)]
         CheckboxList.__init__(self, values)
+        self.checked = checked
 
     @property
     def checked(self) -> bool:
         return "value" in self.current_values
+
+    @checked.setter
+    def checked(self, value: bool) -> None:
+        if value:
+            self.current_values = ["value"]
+        else:
+            self.current_values = []
 
 
 class VerticalLine(object):

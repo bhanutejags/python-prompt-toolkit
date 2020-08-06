@@ -1,12 +1,8 @@
-from __future__ import absolute_import, print_function, unicode_literals
-
 import os
 import re
 import shutil
 import tempfile
 from contextlib import contextmanager
-
-from six import text_type
 
 from prompt_toolkit.completion import (
     CompleteEvent,
@@ -84,7 +80,7 @@ def test_pathcompleter_completes_files_in_absolute_directory():
 
     completer = PathCompleter()
     # force unicode
-    doc_text = text_type(test_dir)
+    doc_text = str(test_dir)
     doc = Document(doc_text, len(doc_text))
     event = CompleteEvent()
     completions = list(completer.get_completions(doc, event))
@@ -432,6 +428,10 @@ def test_nested_completer():
 
     # One word + space + one character.
     completions = completer.get_completions(Document("show i"), CompleteEvent())
+    assert {c.text for c in completions} == {"ip", "interfaces"}
+
+    # One space + one word + space + one character.
+    completions = completer.get_completions(Document(" show i"), CompleteEvent())
     assert {c.text for c in completions} == {"ip", "interfaces"}
 
     # Test nested set.

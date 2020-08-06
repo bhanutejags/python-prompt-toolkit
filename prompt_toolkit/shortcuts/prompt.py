@@ -106,7 +106,7 @@ from prompt_toolkit.layout.processors import (
 )
 from prompt_toolkit.layout.utils import explode_text_fragments
 from prompt_toolkit.lexers import DynamicLexer, Lexer
-from prompt_toolkit.output import ColorDepth, Output
+from prompt_toolkit.output import ColorDepth, DummyOutput, Output
 from prompt_toolkit.styles import (
     BaseStyle,
     ConditionalStyleTransformation,
@@ -116,7 +116,12 @@ from prompt_toolkit.styles import (
     SwapLightAndDarkStyleTransformation,
     merge_style_transformations,
 )
-from prompt_toolkit.utils import get_cwidth, suspend_to_background_supported, to_str
+from prompt_toolkit.utils import (
+    get_cwidth,
+    is_dumb_terminal,
+    suspend_to_background_supported,
+    to_str,
+)
 from prompt_toolkit.validation import DynamicValidator, Validator
 from prompt_toolkit.widgets.toolbars import (
     SearchToolbar,
@@ -479,7 +484,7 @@ class PromptSession(Generic[_T]):
         def accept(buff: Buffer) -> bool:
             """ Accept the content of the default buffer. This is called when
             the validation succeeds. """
-            cast(Application[str], self.app).exit(result=buff.document.text)
+            cast(Application[str], get_app()).exit(result=buff.document.text)
             return True  # Keep text, we call 'reset' later on.
 
         return Buffer(
@@ -657,7 +662,7 @@ class PromptSession(Generic[_T]):
                         # The right prompt.
                         Float(
                             right=0,
-                            top=0,
+                            bottom=0,
                             hide_when_covering_content=True,
                             content=_RPrompt(lambda: self.rprompt),
                         ),
@@ -770,7 +775,7 @@ class PromptSession(Generic[_T]):
             )
 
         @handle("enter", filter=do_accept & default_focused)
-        def _(event: E) -> None:
+        def _accept_input(event: E) -> None:
             " Accept input when enter has been pressed. "
             self.default_buffer.validate_and_handle()
 
@@ -779,12 +784,12 @@ class PromptSession(Generic[_T]):
             return self.complete_style == CompleteStyle.READLINE_LIKE
 
         @handle("tab", filter=readline_complete_style & default_focused)
-        def _(event: E) -> None:
+        def _complete_like_readline(event: E) -> None:
             " Display completions (like Readline). "
             display_completions_like_readline(event)
 
         @handle("c-c", filter=default_focused)
-        def _(event: E) -> None:
+        def _keyboard_interrupt(event: E) -> None:
             " Abort when Control-C has been pressed. "
             event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
 
@@ -799,7 +804,7 @@ class PromptSession(Generic[_T]):
             )
 
         @handle("c-d", filter=ctrl_d_condition & default_focused)
-        def _(event: E) -> None:
+        def _eof(event: E) -> None:
             " Exit when Control-D has been pressed. "
             event.app.exit(exception=EOFError, style="class:exiting")
 
@@ -810,7 +815,7 @@ class PromptSession(Generic[_T]):
             return to_filter(self.enable_suspend)()
 
         @handle("c-z", filter=suspend_supported & enable_suspend)
-        def _(event: E) -> None:
+        def _suspend(event: E) -> None:
             """
             Suspend process to background.
             """
@@ -864,6 +869,7 @@ class PromptSession(Generic[_T]):
         default: Union[str, Document] = "",
         accept_default: bool = False,
         pre_run: Optional[Callable[[], None]] = None,
+        set_exception_handler: bool = True,
     ) -> _T:
         """
         Display the prompt.
@@ -881,9 +887,6 @@ class PromptSession(Generic[_T]):
 
         Additional arguments, specific for this prompt:
 
-        :param _async: (internal, please call `prompt_async` instead). When
-            `True` return a `Future` instead of waiting for the prompt to
-            finish.
         :param default: The default input text to be shown. (This can be edited
             by the user).
         :param accept_default: When `True`, automatically accept the default
@@ -983,7 +986,58 @@ class PromptSession(Generic[_T]):
         )
         self.app.refresh_interval = self.refresh_interval  # This is not reactive.
 
-        return self.app.run()
+        # If we are using the default output, and have a dumb terminal. Use the
+        # dumb prompt.
+        if self._output is None and is_dumb_terminal():
+            return get_event_loop().run_until_complete(self._dumb_prompt(self.message))
+
+        return self.app.run(set_exception_handler=set_exception_handler)
+
+    async def _dumb_prompt(self, message: AnyFormattedText = "") -> _T:
+        """
+        Prompt function for dumb terminals.
+
+        Dumb terminals have minimum rendering capabilities. We can only print
+        text to the screen. We can't use colors, and we can't do cursor
+        movements. The Emacs inferior shell is an example of a dumb terminal.
+
+        We will show the prompt, and wait for the input. We still handle arrow
+        keys, and all custom key bindings, but we don't really render the
+        cursor movements. Instead we only print the typed character that's
+        right before the cursor.
+        """
+        # Send prompt to output.
+        self.output.write(fragment_list_to_text(to_formatted_text(self.message)))
+        self.output.flush()
+
+        # Key bindings for the dumb prompt: mostly the same as the full prompt.
+        key_bindings: KeyBindingsBase = self._create_prompt_bindings()
+        if self.key_bindings:
+            key_bindings = merge_key_bindings([self.key_bindings, key_bindings])
+
+        # Create and run application.
+        application = cast(
+            Application[_T],
+            Application(
+                input=self.input,
+                output=DummyOutput(),
+                layout=self.layout,
+                key_bindings=key_bindings,
+            ),
+        )
+
+        def on_text_changed(_) -> None:
+            self.output.write(self.default_buffer.document.text_before_cursor[-1:])
+            self.output.flush()
+
+        self.default_buffer.on_text_changed += on_text_changed
+        result = await application.run_async()
+
+        # Render line ending.
+        self.output.write("\r\n")
+        self.output.flush()
+
+        return result
 
     async def prompt_async(
         self,
@@ -1031,6 +1085,7 @@ class PromptSession(Generic[_T]):
         default: Union[str, Document] = "",
         accept_default: bool = False,
         pre_run: Optional[Callable[[], None]] = None,
+        set_exception_handler: bool = True,
     ) -> _T:
 
         if message is not None:
@@ -1110,7 +1165,12 @@ class PromptSession(Generic[_T]):
         )
         self.app.refresh_interval = self.refresh_interval  # This is not reactive.
 
-        return await self.app.run_async()
+        # If we are using the default output, and have a dumb terminal. Use the
+        # dumb prompt.
+        if self._output is None and is_dumb_terminal():
+            return await self._dumb_prompt(self.message)
+
+        return await self.app.run_async(set_exception_handler=set_exception_handler)
 
     def _add_pre_run_callables(
         self, pre_run: Optional[Callable[[], None]], accept_default: bool

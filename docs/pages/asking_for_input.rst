@@ -17,12 +17,11 @@ Hello world
 -----------
 
 The following snippet is the most simple example, it uses the
-:func:`~prompt_toolkit.shortcuts.prompt` function to asks the user for input
+:func:`~prompt_toolkit.shortcuts.prompt` function to ask the user for input
 and returns the text. Just like ``(raw_)input``.
 
 .. code:: python
 
-    from __future__ import unicode_literals
     from prompt_toolkit import prompt
 
     text = prompt('Give me some input: ')
@@ -34,14 +33,6 @@ What we get here is a simple prompt that supports the Emacs key bindings like
 readline, but further nothing special. However,
 :func:`~prompt_toolkit.shortcuts.prompt` has a lot of configuration options.
 In the following sections, we will discover all these parameters.
-
-.. note::
-
-    `prompt_toolkit` expects unicode strings everywhere. If you are using
-    Python 2, make sure that all strings which are passed to `prompt_toolkit`
-    are unicode strings (and not bytes). Either use
-    ``from __future__ import unicode_literals`` or explicitly put a small
-    ``'u'`` in front of every string.
 
 
 The `PromptSession` object
@@ -174,7 +165,7 @@ Creating a custom style could be done like this:
 .. code:: python
 
     from prompt_toolkit.shortcuts import prompt
-    from prompt_toolkit.styles import style_from_pygments_cls, merge_styles
+    from prompt_toolkit.styles import Style, style_from_pygments_cls, merge_styles
     from prompt_toolkit.lexers import PygmentsLexer
 
     from pygments.styles.tango import TangoStyle

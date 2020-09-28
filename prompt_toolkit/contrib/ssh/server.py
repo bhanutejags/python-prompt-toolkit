@@ -20,6 +20,7 @@ class PromptToolkitSSHSession(asyncssh.SSHServerSession):
         self, interact: Callable[["PromptToolkitSSHSession"], Awaitable[None]]
     ) -> None:
         self.interact = interact
+        self.interact_task: Optional[asyncio.Task[None]] = None
         self._chan = None
         self.app_session: Optional[AppSession] = None
 
@@ -33,11 +34,18 @@ class PromptToolkitSSHSession(asyncssh.SSHServerSession):
         # in the SSH channel.
         class Stdout:
             def write(s, data):
-                if self._chan is not None:
-                    self._chan.write(data.replace("\n", "\r\n"))
+                try:
+                    if self._chan is not None:
+                        self._chan.write(data.replace("\n", "\r\n"))
+                except BrokenPipeError:
+                    pass  # Channel not open for sending.
 
             def flush(s):
                 pass
+
+            @property
+            def encoding(s):
+                return self._chan._orig_chan.get_encoding()[0]
 
         self.stdout = cast(TextIO, Stdout())
 
@@ -58,16 +66,18 @@ class PromptToolkitSSHSession(asyncssh.SSHServerSession):
         return True
 
     def session_started(self) -> None:
-        asyncio.get_event_loop().create_task(self._interact())
+        self.interact_task = asyncio.get_event_loop().create_task(self._interact())
 
     async def _interact(self) -> None:
         if self._chan is None:
             # Should not happen.
             raise Exception("`_interact` called before `connection_made`.")
 
-        # Disable the line editing provided by asyncssh. Prompt_toolkit
-        # provides the line editing.
-        self._chan.set_line_mode(False)
+        if hasattr(self._chan, "set_line_mode") and self._chan._editor is not None:
+            # Disable the line editing provided by asyncssh. Prompt_toolkit
+            # provides the line editing.
+            self._chan.set_line_mode(False)
+
         term = self._chan.get_terminal_type()
 
         self._output = Vt100_Output(

@@ -377,7 +377,15 @@ class FormattedTextControl(UIControl):
     ) -> Optional[int]:
 
         content = self.create_content(width, None)
-        return content.line_count
+        if wrap_lines:
+            height = 0
+            for i in range(content.line_count):
+                height += content.get_height_for_line(i, width, get_line_prefix)
+                if height >= max_available_height:
+                    return max_available_height
+            return height
+        else:
+            return content.line_count
 
     def create_content(self, width: int, height: Optional[int]) -> UIContent:
         # Get fragments
@@ -688,9 +696,9 @@ class BufferControl(UIControl):
             " Transform the fragments for a given line number. "
             # Get cursor position at this line.
             def source_to_display(i: int) -> int:
-                """ X position from the buffer to the x position in the
+                """X position from the buffer to the x position in the
                 processed fragment list. By default, we start from the 'identity'
-                operation. """
+                operation."""
                 return i
 
             transformation = merged_processor.apply_transformation(

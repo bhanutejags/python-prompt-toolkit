@@ -225,13 +225,16 @@ names to refer to the style.
 The `message` can be any kind of formatted text, as discussed :ref:`here
 <formatted_text>`. It can also be a callable that returns some formatted text.
 
-By default, colors are taking from the 256 color palette. If you want to have
-24bit true color, this is possible by adding the ``true_color=True`` option to
-the :func:`~prompt_toolkit.shortcuts.prompt.prompt` function.
+By default, colors are taken from the 256 color palette. If you want to have
+24bit true color, this is possible by adding the
+``color_depth=ColorDepth.TRUE_COLOR`` option to the
+:func:`~prompt_toolkit.shortcuts.prompt.prompt` function.
 
 .. code:: python
 
-    text = prompt(message, style=style, true_color=True)
+    from prompt_toolkit.output import ColorDepth
+
+    text = prompt(message, style=style, color_depth=ColorDepth.TRUE_COLOR)
 
 
 Autocompletion
@@ -957,3 +960,40 @@ returns a coroutines and is awaitable.
 The :func:`~prompt_toolkit.patch_stdout.patch_stdout` context manager is
 optional, but it's recommended, because other coroutines could print to stdout.
 This ensures that other output won't destroy the prompt.
+
+
+Reading keys from stdin, one key at a time, but without a prompt
+----------------------------------------------------------------
+
+Suppose that you want to use prompt_toolkit to read the keys from stdin, one
+key at a time, but not render a prompt to the output, that is also possible:
+
+.. code:: python
+
+    import asyncio
+
+    from prompt_toolkit.input import create_input
+    from prompt_toolkit.keys import Keys
+
+
+    async def main() -> None:
+        done = asyncio.Event()
+        input = create_input()
+
+        def keys_ready():
+            for key_press in input.read_keys():
+                print(key_press)
+
+                if key_press.key == Keys.ControlC:
+                    done.set()
+
+        with input.raw_mode():
+            with input.attach(keys_ready):
+                await done.wait()
+
+
+    if __name__ == "__main__":
+        asyncio.run(main())
+
+The above snippet will print the `KeyPress` object whenever a key is pressed.
+This is also cross platform, and should work on Windows.

@@ -110,13 +110,16 @@ root_container = HSplit(
         VSplit(
             [
                 Frame(body=ProgressBar(), title="Progress bar"),
-                Frame(title="Checkbox list", body=HSplit([checkbox1, checkbox2,])),
+                Frame(
+                    title="Checkbox list",
+                    body=HSplit([checkbox1, checkbox2]),
+                ),
                 Frame(title="Radio list", body=radios),
             ],
             padding=1,
         ),
         Box(
-            body=VSplit([yes_button, no_button,], align="CENTER", padding=3),
+            body=VSplit([yes_button, no_button], align="CENTER", padding=3),
             style="class:button-bar",
             height=3,
         ),
@@ -170,8 +173,8 @@ root_container = MenuContainer(
                 MenuItem("Time/Date"),
             ],
         ),
-        MenuItem("View", children=[MenuItem("Status Bar"),]),
-        MenuItem("Info", children=[MenuItem("About"),]),
+        MenuItem("View", children=[MenuItem("Status Bar")]),
+        MenuItem("Info", children=[MenuItem("About")]),
     ],
     floats=[
         Float(
@@ -199,15 +202,13 @@ style = Style.from_dict(
         "window.border shadow": "#444444",
         "focused  button": "bg:#880000 #ffffff noinherit",
         # Styling for Dialog widgets.
-        "radiolist focused": "noreverse",
-        "radiolist focused radio.selected": "reverse",
         "button-bar": "bg:#aaaaff",
     }
 )
 
 
 application = Application(
-    layout=Layout(root_container, focused_element=yes_button,),
+    layout=Layout(root_container, focused_element=yes_button),
     key_bindings=bindings,
     style=style,
     mouse_support=True,

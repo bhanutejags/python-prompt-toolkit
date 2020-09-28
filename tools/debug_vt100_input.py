@@ -2,6 +2,8 @@
 """
 Parse vt100 input and print keys.
 For testing terminal input.
+
+(This does not use the `Input` implementation, but only the `Vt100Parser`.)
 """
 import sys
 
@@ -26,5 +28,5 @@ def main():
             stream.feed(c)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

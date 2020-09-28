@@ -8,6 +8,8 @@ http://pygments.org/
 """
 import array
 import errno
+import io
+import os
 import sys
 from typing import (
     IO,
@@ -451,16 +453,21 @@ class Vt100_Output(Output):
         (This will take the dimensions by reading the pseudo
         terminal attributes.)
         """
+        fd: Optional[int]
         # Normally, this requires a real TTY device, but people instantiate
         # this class often during unit tests as well. For convenience, we print
         # an error message, use standard dimensions, and go on.
-        fd = stdout.fileno()
+        try:
+            fd = stdout.fileno()
+        except io.UnsupportedOperation:
+            fd = None
 
-        if not stdout.isatty() and fd not in cls._fds_not_a_terminal:
+        if not stdout.isatty() and (fd is None or fd not in cls._fds_not_a_terminal):
             msg = "Warning: Output is not a terminal (fd=%r).\n"
             sys.stderr.write(msg % fd)
             sys.stderr.flush()
-            cls._fds_not_a_terminal.add(fd)
+            if fd is not None:
+                cls._fds_not_a_terminal.add(fd)
 
         def get_size() -> Size:
             # If terminal (incorrectly) reports its size as 0, pick a
@@ -686,6 +693,20 @@ class Vt100_Output(Output):
         """
         self.write_raw("\x1b[6n")
         self.flush()
+
+    @property
+    def responds_to_cpr(self) -> bool:
+        # When the input is a tty, we assume that CPR is supported.
+        # It's not when the input is piped from Pexpect.
+        if os.environ.get("PROMPT_TOOLKIT_NO_CPR", "") == "1":
+            return False
+
+        if is_dumb_terminal(self.term):
+            return False
+        try:
+            return self.stdout.isatty()
+        except ValueError:
+            return False  # ValueError: I/O operation on closed file
 
     def bell(self) -> None:
         " Sound bell. "
